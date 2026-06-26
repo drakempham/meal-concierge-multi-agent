@@ -1,0 +1,215 @@
+{
+  "family_members": {
+    "husband": {
+      "likes": [
+        "beef",
+        "chicken",
+        "spicy food",
+        "tacos"
+      ],
+      "dislikes": []
+    },
+    "wife": {
+      "likes": [
+        "grilled chicken",
+        "salad",
+        "pasta"
+      ],
+      "dislikes": [
+        "seafood",
+        "fish",
+        "shellfish"
+      ]
+    },
+    "kid1": {
+      "likes": [
+        "pizza",
+        "burgers",
+        "tacos",
+        "spaghetti"
+      ],
+      "dislikes": [
+        "mushrooms",
+        "onions"
+      ]
+    },
+    "kid2": {
+      "likes": [
+        "mac and cheese",
+        "chicken nuggets",
+        "pizza"
+      ],
+      "dislikes": [
+        "broccoli",
+        "spicy food"
+      ]
+    }
+  },
+  "dietary_constraints": [
+    "No seafood or fish of any kind (wife dislikes seafood and fish)",
+    "No mushrooms or raw onions (kids dislike them)",
+    "No extremely spicy food when kids are present"
+  ],
+  "target_macros": {
+    "daily_protein_g": 120,
+    "daily_fat_g": 70,
+    "daily_calories": 2200
+  },
+  "recipe_rotation": [
+    {
+      "name": "Homemade Pepperoni Pizza",
+      "ingredients": {
+        "flour_g": 500,
+        "yeast_g": 10,
+        "cheese_g": 300,
+        "pepperoni_g": 150,
+        "tomato_sauce_g": 200
+      },
+      "prep_time_minutes": 20,
+      "cook_time_minutes": 15,
+      "cooking_style": "Oven",
+      "protein_g": 90,
+      "fat_g": 80,
+      "calories": 1800
+    },
+    {
+      "name": "Classic Beef Tacos",
+      "ingredients": {
+        "ground_beef_g": 500,
+        "taco_shells": 8,
+        "cheese_g": 150,
+        "lettuce_g": 100,
+        "tomato_g": 150
+      },
+      "prep_time_minutes": 15,
+      "cook_time_minutes": 15,
+      "cooking_style": "Stovetop",
+      "protein_g": 110,
+      "fat_g": 75,
+      "calories": 1600
+    },
+    {
+      "name": "Grilled Chicken Souvlaki",
+      "ingredients": {
+        "chicken_breast_g": 600,
+        "lemon": 1,
+        "olive_oil_ml": 50,
+        "oregano_g": 10
+      },
+      "prep_time_minutes": 15,
+      "cook_time_minutes": 20,
+      "cooking_style": "Grill",
+      "protein_g": 140,
+      "fat_g": 35,
+      "calories": 900
+    },
+    {
+      "name": "Slow Cooker Beef Chili",
+      "ingredients": {
+        "stewing_beef_g": 700,
+        "canned_beans_g": 400,
+        "tomato_paste_g": 150,
+        "chili_powder_g": 15
+      },
+      "prep_time_minutes": 15,
+      "cook_time_minutes": 360,
+      "cooking_style": "Slow Cooker",
+      "protein_g": 160,
+      "fat_g": 50,
+      "calories": 1500
+    },
+    {
+      "name": "Stir-Fry Chicken and Broccoli",
+      "ingredients": {
+        "chicken_breast_g": 500,
+        "broccoli_g": 300,
+        "soy_sauce_ml": 50,
+        "ginger_g": 10
+      },
+      "prep_time_minutes": 15,
+      "cook_time_minutes": 10,
+      "cooking_style": "Stovetop",
+      "protein_g": 120,
+      "fat_g": 20,
+      "calories": 800
+    },
+    {
+      "name": "Cheddar Cheeseburgers",
+      "ingredients": {
+        "beef_patties_g": 600,
+        "burger_buns": 4,
+        "cheddar_slices": 4,
+        "lettuce_g": 50
+      },
+      "prep_time_minutes": 10,
+      "cook_time_minutes": 15,
+      "cooking_style": "Grill",
+      "protein_g": 130,
+      "fat_g": 90,
+      "calories": 1800
+    },
+    {
+      "name": "Creamy Pasta Alfredo",
+      "ingredients": {
+        "pasta_g": 400,
+        "heavy_cream_ml": 200,
+        "butter_g": 50,
+        "parmesan_g": 100
+      },
+      "prep_time_minutes": 10,
+      "cook_time_minutes": 15,
+      "cooking_style": "Stovetop",
+      "protein_g": 40,
+      "fat_g": 95,
+      "calories": 1500
+    },
+    {
+      "name": "Spaghetti Bolognese",
+      "ingredients": {
+        "ground_beef_g": 500,
+        "spaghetti_pasta_g": 400,
+        "tomato_sauce_ml": 700,
+        "onion_unit": 1,
+        "garlic_cloves": 3
+      },
+      "prep_time_minutes": 45,
+      "cook_time_minutes": 15,
+      "cooking_style": "Stovetop",
+      "protein_g": 35,
+      "fat_g": 18,
+      "calories": 650
+    },
+    {
+      "name": "Pasta",
+      "ingredients": {
+        "pasta_g": 100,
+        "tomato_sauce_ml": 150,
+        "parmesan_cheese_g": 20
+      },
+      "prep_time_minutes": 20,
+      "cook_time_minutes": 15,
+      "cooking_style": "Stovetop",
+      "protein_g": 15,
+      "fat_g": 10,
+      "calories": 450
+    }
+  ],
+  "pantry": {
+    "chicken_breast_g": 300,
+    "pasta_g": 500,
+    "flour_g": 1000,
+    "yeast_g": 50,
+    "cheese_g": 200,
+    "tomato_sauce_g": 600,
+    "ground_beef_g": 0,
+    "lettuce_g": 150,
+    "broccoli_g": 100,
+    "canned_beans_g": 0,
+    "stewing_beef_g": 0,
+    "cheddar_slices": 0,
+    "burger_buns": 0,
+    "heavy_cream_ml": 0,
+    "butter_g": 250,
+    "parmesan_g": 50
+  }
+}

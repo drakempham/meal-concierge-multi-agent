@@ -1,0 +1,25 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "weekly_plan_request",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Can you please plan my family meals for this week?"}]
+      }
+    },
+    {
+      "eval_case_id": "positive_feedback_request",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Hey agent, the Spaghetti Bolognese we cooked last night was amazing! We loved it."}]
+      }
+    },
+    {
+      "eval_case_id": "protein_focused_plan",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "I need a weekly meal plan but focus on getting high protein for my workouts."}]
+      }
+    }
+  ]
+}

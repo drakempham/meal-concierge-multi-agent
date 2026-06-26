@@ -1,0 +1,50 @@
+metrics_to_run:
+  - custom_response_quality
+  - meal_constraint_adherence
+
+custom_metrics:
+  - name: custom_response_quality
+    prompt_template: |
+      You are an expert quality assurance evaluator. Evaluate the final response of a family meal concierge agent on a scale of 1 to 5:
+      1 (Poor): Inaccurate, ignores constraints, or fails to answer the query.
+      2 (Below Average): Partially answers but violates multiple rules or has poor structure.
+      3 (Acceptable): Adequately answers but has minor issues or lacks detail.
+      4 (Good): Clean structure, accurate, adheres to instructions well.
+      5 (Excellent): Comprehensive, accurate, beautifully organized, and meets all criteria.
+
+      ### Inputs:
+      User Prompt: {prompt}
+      Final Response: {response}
+      Agent Trace: {agent_data}
+
+      Return JSON matching:
+      {
+        "score": <1-5>,
+        "explanation": "<rationale>"
+      }
+
+  - name: meal_constraint_adherence
+    prompt_template: |
+      You are an expert AI agent evaluator. Your task is to evaluate if the proposed meal plan adheres to the active family constraints:
+      1. Dietary Restrictions: No seafood or fish of any kind (due to picky wife). No mushrooms or onions.
+      2. Weather Constraints: If weather is Rainy or Thunderstorms, the agent must NOT suggest outdoor grilling for that day.
+      3. Schedule/Calendar: If a sports practice or late work meeting is scheduled, dinner time must be late (7:00 PM or later) and prep time should be short (under 30 minutes).
+      4. Portion/Headcount: If kids are away (Friday to Sunday), the servings/ingredients should scale down.
+
+      Evaluate the final response and trace. Grade the adherence on a scale of 1 to 5:
+      1: Complete violation of multiple critical rules (e.g. suggesting grilled fish on a rainy day).
+      2: Major violation of at least one rule (e.g. seafood included).
+      3: Minor violation of rules (e.g. incorrect dinner time).
+      4: Adheres to all main rules, minor optimization possible.
+      5: Perfect adherence to all dietary, weather, calendar, and portion constraints.
+
+      ### Inputs:
+      User Prompt: {prompt}
+      Final Response: {response}
+      Agent Trace: {agent_data}
+
+      Return JSON matching:
+      {
+        "score": <1-5>,
+        "explanation": "<rationale>"
+      }
