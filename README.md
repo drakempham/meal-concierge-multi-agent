@@ -7,14 +7,13 @@
 ## 📖 Table of Contents
 1. [Core Features](#-core-features)
 2. [Architecture Overview](#️-architecture-overview)
-3. [Multi-Model Strategy](#-multi-model-strategy)
-4. [Workflow Graph](#-workflow-graph)
-5. [Project Directory Structure](#-project-directory-structure)
-6. [Prerequisites](#-prerequisites)
-7. [Installation & Setup](#-installation--setup)
-8. [Usage Guide](#-usage-guide)
-9. [Testing & Quality Verification](#-testing--quality-verification)
-10. [Changelog](#-changelog)
+3. [Workflow Graph](#-workflow-graph)
+4. [Project Directory Structure](#-project-directory-structure)
+5. [Prerequisites](#-prerequisites)
+6. [Installation & Setup](#-installation--setup)
+7. [Usage Guide](#-usage-guide)
+8. [Testing & Quality Verification](#-testing--quality-verification)
+9. [Changelog](#-changelog)
 
 ---
 
@@ -24,50 +23,30 @@
 * **Dietary Preferences & Picky Eaters**: Automatically ignores forbidden ingredients (like shellfish or seafood) and avoids foods family members dislike.
 * **Long-Term Memory Rotation**: Reads and writes favorite recipe rotations to a persistent local JSON configuration (`user_profile.json`).
 * **Interactive Approval Loop (HITL)**: Proposes a menu first and allows the user to suggest adjustments or revisions before approving. Adjustments modify **only the specific requested days**, keeping all other days unchanged.
-* **Smart Grocery List**: Compiles required ingredients and subtracts quantities already in the pantry/fridge to output a minimal, categorized shopping list.
-* **Embedding-Based Semantic Router**: Uses `gemini-embedding-1` vector similarity (not keywords) to classify user intent as `plan` or `feedback` — understands any language and phrasing.
-* **Automatic Model Fallback Chain**: Never crashes on quota errors. Automatically rotates through 6 Gemini models when the primary model is unavailable.
-* **🆕 Visual Menu Preview (DALL-E 3)**: After generating the weekly menu, automatically creates a beautiful food photography collage image displayed inline in the chat before asking for approval.
+* **Smart Grocery List & Cost Estimator**: Compiles required ingredients, subtracts quantities already in the pantry/fridge, computes a categorized list, and estimates the total budget using mock prices.
+* **Semantic Routing**: Uses semantic vector similarity to classify user intent as `plan`, `feedback`, or `recipe` — understanding natural phrasing and multilingual inputs.
+* **Cooking Recipe Instructor**: Provides step-by-step cooking preparation, ingredient amounts, instructions, and chef tips for any meal on the menu.
+* **Automatic Model Fallback**: Features a robust fallback mechanism that automatically rotates through alternative models in sequence if the primary model is unavailable.
+* **Visual Menu Preview**: After generating the weekly menu, automatically creates a beautiful food photography collage image displayed inline in the chat before asking for approval.
 
 ---
 
 ## 🗺️ Architecture Overview
 
-The system is composed of **3 distinct model pools** with fully isolated quotas:
+The system is designed as a modular multi-agent workflow leveraging Google Agent Development Kit (ADK 2.0). It operates on a stateful graph where specialized nodes execute specific tasks:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  POOL 1: Embedding Router (gemini-embedding-1, RPD: 1000)   │
-│  Purpose: Intent classification via cosine similarity        │
-│  Completely isolated from main agent quota pool             │
-└─────────────────────────────────────────────────────────────┘
+1. **Semantic Routing Layer**: Routes incoming queries to the meal planning flow, the memory feedback processor, or the recipe instructor based on semantic text embedding similarity.
+2. **Context Aggregator**: Collects and parses calendar schedules, weather forecasts, inventory counts, and user preference profiles.
+3. **Core Planner Agent**: Generates a structured 7-day meal plan conforming to all constraints.
+4. **Visualizer Node**: Integrates with a text-to-image API to output a representative food photography collage for the proposed menu.
+5. **Human-in-the-Loop Review Node**: Pauses the graph execution, allowing users to request targeted adjustments (e.g. changing Wednesday's dinner) without regenerating the entire plan.
+6. **Smart Grocery Compiler & Cost Estimator**: Analyzes the approved plan, compares it to current pantry inventory, outputs a final shopping list, and calculates the total estimated budget using mock prices.
+7. **Long-Term Memory Agent**: Analyzes recipe sentiment to add or remove favorite recipes from the persistent family profile.
+8. **Cooking Recipe Instructor Agent**: Identifies which meal the user is asking about from the active session menu and generates full recipe details, prep steps, and cooking tips.
 
-┌─────────────────────────────────────────────────────────────┐
-│  POOL 2: Image Generator (DALL-E 3 - OpenAI API)            │
-│  Purpose: Weekly menu food photography collage               │
-│  Completely isolated — does not consume LLM or embed quota  │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│  POOL 3: Main Agents — FallbackGemini chain                 │
-│  Primary: gemini-3.5-flash (RPD: 20)                        │
-│  Fallback 1: gemini-3.1-flash-lite (RPD: 500) ← high quota │
-│  Fallback 2: gemini-2.5-flash-lite (RPD: 20)               │
-│  Fallback 3: gemini-3-flash-preview (RPD: 20)              │
-│  Fallback 4: gemini-2.5-flash (RPD: 20)                    │
-│  Fallback 5: gemini-2.0-flash (backup)                     │
-│  Fallback 6: gemini-1.5-flash (last resort)                │
-│  Timeout: 20s per model → auto-switch on slow response      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### FallbackGemini Behaviour
-
-The custom `FallbackGemini` class (extends `Gemini`) handles:
-- **503 UNAVAILABLE** (high demand): Switch to next model immediately
-- **429 RESOURCE_EXHAUSTED** (quota limit): Switch to next model immediately
-- **20-second timeout**: If a model is slow but doesn't error, switch after 20s
-- **SDK-level retries disabled** (`attempts=1`): Errors bubble up instantly so the fallback can act fast — no waiting 3–5 minutes for SDK internal retries
+### Robustness & Performance
+* **Separated Resource Pools**: High-frequency semantic routing is kept separate from heavy generation tasks to optimize resource limits.
+* **Automatic Fallback Chain**: Main agents are backed by a fallback sequence that automatically rotates through available text models in case of network timeouts or resource limits.
 
 ---
 
@@ -76,33 +55,35 @@ The custom `FallbackGemini` class (extends `Gemini`) handles:
 ```mermaid
 graph TD
     User([User Message]) --> EmbeddingRouter[Embedding Intent Router
-gemini-embedding-1
-Cosine Similarity]
+Semantic Cosine Similarity]
     
     EmbeddingRouter -->|intent: plan| ContextNode[collect_context Node
 Weather + Calendar + Pantry + Profile]
     EmbeddingRouter -->|intent: feedback| FeedbackAgent[FeedbackAgent
 Sentiment + Recipe Details]
+    EmbeddingRouter -->|intent: recipe| RecipeCtx[collect_recipe_context Node]
     
     ContextNode --> MenuGen[MenuGeneratorAgent
-FallbackGemini Chain
 7-Day WeeklyMenu]
     MenuGen --> Visualizer[menu_visualizer Node
-    OpenAI DALL-E 3
-    Food Photo Collage]
+Image Generation]
     Visualizer --> UserReview{user_review_node
 HITL Interrupt}
     
     UserReview -->|approved| GroceryBuilder[grocery_list_builder Node
-Pantry Subtraction]
+Pantry Subtraction + Cost Estimator]
     UserReview -->|adjust| ContextNode
 
-    GroceryBuilder --> ShoppingList([Categorized Grocery List])
+    GroceryBuilder --> ShoppingList([Categorized Grocery List & Budget])
     
     FeedbackAgent --> FeedbackProcessor[feedback_processor Node
 Memory Update]
     FeedbackProcessor --> MemUpdate([Memory Updated:
 Add/Remove from Rotation])
+
+    RecipeCtx --> RecipeInstructor[RecipeInstructor Agent
+Detailed Cooking Recipe]
+    RecipeInstructor --> RecipeDetails([Recipe Details & Chef Tips])
 ```
 
 ### Menu Adjustment Flow (HITL Loop)
@@ -262,8 +243,6 @@ Expected: `[Memory Update] Removed 'X' from your family favorites rotation.`
 
 ---
 
----
-
 ## 🛠️ Testing & Quality Verification
 
 ### Run Unit Tests (`pytest`)
@@ -273,7 +252,7 @@ uv run pytest tests/unit/
 
 ### Run Systematic LLM Evaluations
 ```bash
-~/.local/bin/agents-cli eval run
+uv run agents-cli eval run
 ```
 Runs scenarios in `basic-dataset.json`, grades trace outcomes, and generates scores based on constraint adherence rules in `eval_config.yaml`.
 
@@ -282,49 +261,15 @@ Runs scenarios in `basic-dataset.json`, grades trace outcomes, and generates sco
 ## 📝 Changelog
 
 ### v2.0.0 — June 2026 (Current)
-
-#### 🆕 New: Visual Menu Preview — OpenAI DALL-E 3
-- Added `menu_visualizer` node between `MenuGeneratorAgent` and `user_review_node`
-- Calls OpenAI DALL-E 3 API (`dall-e-3`) — **3rd isolated quota pool (using `OPENAI_API_KEY`)**
-- Generates 1 high-quality food photography image representing all 7 meals
-- Displays inline in Playground chat with caption before asking user to approve
-- **Graceful fallback**: if OpenAI API quota is exhausted or API error, skips image with a note and continues workflow normally — never blocks the meal planning flow
-
-#### 🆕 New: Embedding-Based Semantic Router
-- **Replaced** keyword-based `user_query_router` with `embedding_intent_router`
-- Uses `gemini-embedding-1` API (RPD: 1,000) — **50× more quota** than LLM router
-- Computes cosine similarity between user query and pre-cached centroid embeddings
-- Reference centroids computed **once at startup**, cached for all subsequent calls
-- **Fallback**: graceful degradation to keyword matching if Embedding API is unavailable
-- Understands any phrasing, multilingual, positive/negative sentiment context
-
-#### 🆕 New: FallbackGemini — Automatic Model Rotation
-- Custom `FallbackGemini` class extends ADK's `Gemini`
-- **7-model fallback chain**: gemini-3.5-flash → gemini-3.1-flash-lite → gemini-2.5-flash-lite → gemini-3-flash-preview → gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash
-- **20-second per-model timeout**: Never hangs on slow models
-- **SDK retries disabled** (`attempts=1`): Errors surface instantly so fallback triggers immediately
-- Covers: 503 UNAVAILABLE, 429 RESOURCE_EXHAUSTED, 404 NOT_FOUND, asyncio.TimeoutError
-
-#### 🆕 New: Precise Menu Adjustment (HITL Loop Fix)
-- `WeeklyContext` now includes `previous_menu` field
-- When user requests adjustment, `collect_context` reads `state["current_menu"]` and passes it to `MenuGeneratorAgent`
-- Prompt explicitly instructs LLM to **only modify the requested day(s)**, keeping all other days identical
-- Fixed: previously LLM would regenerate the entire menu from scratch on adjustments
-
-#### 🐛 Fixed: ValidationError on Adjust Route
-- `user_review_node` was passing `WeeklyMenu` object (not `str`) to `collect_context`
-- Fixed: adjusted branch now passes `response` (user's text string) as `output`
-- `collect_context` signature updated to `node_input: Any` for flexibility
-
-#### 🏗️ Architecture: Isolated Quota Pools
-- Router quota completely separated from main agent quota
-- `router_model` uses plain `Gemini` (not `FallbackGemini`) to prevent cross-pool interference
+* **Cooking Recipe Instructor**: Added a dedicated recipe instructor agent to provide detailed cooking steps, prep times, and chef tips for any meal on the menu.
+* **Grocery Cost Estimator**: Integrated a budget estimation system using mock prices per unit and dynamic unit formatting.
+* **Visual Menu Preview**: Integrated image generation to display an inline visual collage of the proposed meals. Includes a graceful fallback if image generation is unavailable.
+* **Semantic Routing**: Replaced keyword matching with a vector-embedding similarity router to handle multilingual, flexible intent detection across planning, feedback, and recipe queries.
+* **Robust Fallback Model Chain**: Added an automatic model-rotation mechanism to handle transient API errors or quota limits seamlessly.
+* **Precise Menu Adjustment**: Improved the Human-in-the-Loop flow to support incremental menu updates, replacing only the requested days while preserving the rest of the plan.
 
 ### v1.0.0 — June 2026 (Initial)
-- Core ADK 2.0 workflow with `@node` decorators
-- `MenuGeneratorAgent` with `WeeklyMenu` structured output
-- `FeedbackAgent` with sentiment classification
-- `grocery_list_builder` with pantry subtraction
-- HITL `user_review_node` with `ResumabilityConfig`
-- Mock tools: `get_weather_forecast`, `get_family_calendar`, `get_pantry_inventory`
-- Long-term memory: `add_recipe_to_rotation`, `remove_recipe_from_rotation`
+* Core ADK 2.0 graph workflow.
+* Main planning and feedback agents.
+* Refrigerator/pantry ingredient subtraction.
+* Long-term profile memory storage.

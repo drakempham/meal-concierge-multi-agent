@@ -214,6 +214,18 @@ _INTENT_EXAMPLES: Dict[str, List[str]] = {
         "Adjust Thursday to something easy with short prep time",
         "Generate a meal plan based on our pantry",
     ],
+    "recipe": [
+        "How do I cook Wednesday's meal?",
+        "Give me the recipe for Cheeseburgers",
+        "Can you show me the cooking instructions for the Salmon?",
+        "Show me how to make chicken breast",
+        "I want the recipe for Friday's dinner",
+        "How do you prepare the Spaghetti?",
+        "Cooking steps for Sunday's menu item please",
+        "Give me the recipe details for the tacos",
+        "How to make Monday's dinner?",
+        "Instructions for cooking the grilled chicken",
+    ],
 }
 
 # Module-level cache for pre-computed reference centroid embeddings.
@@ -329,7 +341,7 @@ async def embedding_intent_router(ctx: Context, node_input: Any) -> Event:
         intent = max(scores, key=scores.get)
         logger.info(
             f"EmbeddingRouter: '{query[:60]}' → intent='{intent}' "
-            f"(plan={scores['plan']:.3f}, feedback={scores['feedback']:.3f})"
+            f"(plan={scores['plan']:.3f}, feedback={scores['feedback']:.3f}, recipe={scores.get('recipe', 0.0):.3f})"
         )
 
     except Exception as e:
@@ -341,7 +353,17 @@ async def embedding_intent_router(ctx: Context, node_input: Any) -> Event:
             "hate", "hated", "dislike", "terrible", "awful", "disgusting",
             "amazing", "fantastic", "delicious", "enjoyed", "didn't like",
         ]
-        intent = "feedback" if any(k in query_lower for k in feedback_keywords) else "plan"
+        recipe_keywords = [
+            "recipe", "cook", "instruction", "instructions", "prepare", "steps",
+            "how to make", "how to cook", "formula", "recipe for",
+        ]
+        
+        if any(k in query_lower for k in feedback_keywords):
+            intent = "feedback"
+        elif any(k in query_lower for k in recipe_keywords):
+            intent = "recipe"
+        else:
+            intent = "plan"
         logger.info(f"EmbeddingRouter: Keyword fallback → intent='{intent}'")
 
     return Event(output=query, route=intent, state={"user_query": query})
@@ -656,6 +678,72 @@ def grocery_list_builder(node_input: WeeklyMenu) -> Event:
         if needed > 0:
             shopping_list[ing] = needed
 
+    def parse_ingredient_unit(ing_name: str):
+        unit = " units"
+        clean_name = ing_name
+        if ing_name.endswith("_g"):
+            unit = "g"
+            clean_name = ing_name[:-2]
+        elif ing_name.endswith("_ml"):
+            unit = "ml"
+            clean_name = ing_name[:-3]
+        elif ing_name.endswith("_pcs"):
+            unit = " pcs"
+            clean_name = ing_name[:-4]
+        elif ing_name.endswith("_pc"):
+            unit = " pc"
+            clean_name = ing_name[:-3]
+        
+        clean_name = clean_name.replace("_", " ")
+        return clean_name, unit
+
+    def get_ingredient_price(ing_name: str, qty: float) -> float:
+        # Mock price database per unit (g, ml, pc)
+        prices = {
+            # Grams
+            "chicken": 0.01,
+            "beef": 0.015,
+            "meat": 0.015,
+            "pasta": 0.005,
+            "cheese": 0.02,
+            "cheddar": 0.02,
+            "parmesan": 0.02,
+            "butter": 0.01,
+            "flour": 0.002,
+            "sauce": 0.006,
+            "beans": 0.004,
+            "broccoli": 0.008,
+            "onion": 0.005,
+            "pepperoni": 0.05,
+            # Milliliters
+            "soy_sauce": 0.012,
+            "oil": 0.015,
+            "milk": 0.002,
+            # Pieces / count
+            "lemon": 0.50,
+            "burger_buns": 0.40,
+            "eggs": 0.25,
+            "cloves": 0.05
+        }
+        
+        # Try to find a match by keyword
+        lower_name = ing_name.lower()
+        for key, price in prices.items():
+            if key in lower_name:
+                return price * qty
+                
+        # Default fallback pricing if not found in db
+        if ing_name.endswith("_g"):
+            return 0.01 * qty
+        elif ing_name.endswith("_ml"):
+            return 0.01 * qty
+        elif ing_name.endswith("_pcs") or ing_name.endswith("_pc"):
+            return 0.50 * qty
+        return 1.0 * qty
+
+    # Calculate total cost
+    total_cost = sum(get_ingredient_price(ing, qty) for ing, qty in shopping_list.items())
+
     # 3. Format categorized shopping list
     output_text = "\n### 🛒 Approved! Your Categorized Grocery List:\n"
     if not shopping_list:
@@ -671,7 +759,18 @@ def grocery_list_builder(node_input: WeeklyMenu) -> Event:
             elif "pasta" in ing or "flour" in ing or "bean" in ing or "sauce" in ing:
                 category = "Pantry Staples"
             
-            output_text += f"- [{category}] {ing.replace('_g','').replace('_ml','').replace('_',' ')}: {qty} units/g/ml\n"
+            clean_name, unit = parse_ingredient_unit(ing)
+            req_qty = required_ingredients[ing]
+            pantry_qty = pantry.get(ing, 0)
+            
+            if pantry_qty > 0:
+                detail_str = f" (requires {req_qty}{unit}, has {pantry_qty}{unit} in stock)"
+            else:
+                detail_str = ""
+                
+            output_text += f"- [{category}] {clean_name}: need {qty}{unit}{detail_str}\n"
+            
+        output_text += f"\n**Estimated Weekly Grocery Budget: ${total_cost:.2f}**\n"
             
     # Yield content for the user interface
     yield Event(content=types.Content(role="model", parts=[types.Part.from_text(text=output_text)]))
@@ -739,6 +838,55 @@ def feedback_processor(node_input: FeedbackOutput) -> str:
     yield Event(content=types.Content(role="model", parts=[types.Part.from_text(text=result_message)]))
     yield Event(output=result_message)
 
+# ---------------------------------------------------------------------------
+# Cooking Recipe Instructor Agent & Nodes
+# ---------------------------------------------------------------------------
+@node
+def collect_recipe_context(ctx: Context, node_input: Any) -> str:
+    """Combines user query and last generated menu into a single string for the LLM agent."""
+    import json
+    query = ""
+    if hasattr(node_input, "parts") and node_input.parts:
+        query = "".join(part.text for part in node_input.parts if part.text)
+    elif isinstance(node_input, str):
+        query = node_input
+    elif isinstance(node_input, dict):
+        query = node_input.get("query", str(node_input))
+    query = query.strip()
+
+    current_menu_state = ctx.state.get("current_menu")
+    menu_context = ""
+    if current_menu_state:
+        if isinstance(current_menu_state, dict) and "meals" in current_menu_state:
+            menu_context = json.dumps(current_menu_state["meals"], indent=2)
+        elif hasattr(current_menu_state, "meals"):
+            menu_context = json.dumps([m.model_dump() for m in current_menu_state.meals], indent=2)
+
+    return f"User query: {query}\n\nActive Menu Context:\n{menu_context if menu_context else 'No active menu proposal found in this session.'}"
+
+recipe_instructor_instruction = """
+You are Meal Concierge Multi-Agent's recipe and cooking instructor.
+The user is asking for recipe details or cooking instructions for a meal.
+
+Your input will contain the user query and the active weekly menu context (if any).
+Your job is to:
+1. Identify which meal/day the user is asking about (e.g. Wednesday's dinner, or a specific meal name like 'Grilled Chicken Souvlaki'). If no active menu exists or you cannot identify the meal, construct a recipe matching the name they mentioned.
+2. Provide a detailed cooking recipe with:
+   - **Meal Name**
+   - **Prep Time & Cook Time**
+   - **Ingredients list** (make sure to match amounts and names from the weekly menu if available, or suggest reasonable ones)
+   - **Step-by-Step Cooking Instructions**
+   - **Chef's Tip** (a helpful tip for making the dish taste great or making preparation easier)
+
+Format the recipe beautifully in Markdown so it is easy to read. Write the response in a friendly and encouraging tone.
+"""
+
+recipe_instructor = LlmAgent(
+    name="RecipeInstructor",
+    model=model_instance,
+    instruction=recipe_instructor_instruction
+)
+
 # ==========================================
 # 3. Connect Workflow Graph
 # ==========================================
@@ -751,7 +899,11 @@ chef_workflow = Workflow(
         (START, embedding_intent_router),
 
         # Step 2: Route to correct branch based on embedding similarity score
-        (embedding_intent_router, {"plan": collect_context, "feedback": feedback_agent}),
+        (embedding_intent_router, {
+            "plan": collect_context,
+            "feedback": feedback_agent,
+            "recipe": collect_recipe_context
+        }),
 
         # Plan flow: collect context → generate menu → visualize → user review (HITL)
         (collect_context, menu_generator_agent),
@@ -762,7 +914,10 @@ chef_workflow = Workflow(
         (user_review_node, {"adjust": collect_context, "approved": grocery_list_builder}),
 
         # Feedback flow: feedback agent → memory update
-        (feedback_agent, feedback_processor)
+        (feedback_agent, feedback_processor),
+
+        # Recipe flow: collect context → recipe instructor agent
+        (collect_recipe_context, recipe_instructor)
     ]
 )
 

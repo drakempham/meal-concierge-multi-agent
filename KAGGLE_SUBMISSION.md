@@ -22,6 +22,7 @@ graph TD
     %% Intent Routing
     Router -->|Route: plan| Context[collect_context Node]
     Router -->|Route: feedback| FeedbackAgent[FeedbackAgent]
+    Router -->|Route: recipe| RecipeCtx[collect_recipe_context Node]
     
     %% Meal Planning Workflow (HITL)
     Context --> MenuGen[MenuGeneratorAgent]
@@ -36,26 +37,31 @@ graph TD
     FeedbackAgent --> Processor[feedback_processor Node]
     Processor --> Memory[(user_profile.json)]
     
+    %% Recipe Instructor
+    RecipeCtx --> RecipeInstructor[RecipeInstructor Agent]
+    
     %% Outputs
     Grocery --> END([Categorized Grocery List])
     Processor --> END
+    RecipeInstructor --> END
 ```
 
 ### Specialized Agents & Components:
-1. **`embedding_intent_router` (Semantic Router)**: Uses text embedding similarity (with `gemini-embedding-1` and fallback keyword matching) to route inputs to the planning flow (`plan`) or the feedback/rating flow (`feedback`).
+1. **`embedding_intent_router` (Semantic Router)**: Uses text embedding similarity (with fallback keyword matching) to route inputs to the planning flow (`plan`), feedback/rating flow (`feedback`), or recipe instruction flow (`recipe`).
 2. **`collect_context` (Tool Integrator)**: Synthesizes input by querying family calendar events, weather forecasts, refrigerator/pantry inventory, and long-term favorites rotation.
 3. **`MenuGeneratorAgent` (Core LlmAgent)**: Formulates a structured 7-day weekly menu that satisfies all dietary, schedule, and cooking constraints.
 4. **`menu_visualizer` (Visualizer Node)**: Calls the **Gemini 3.1 Flash Image** model to generate and display a beautiful food photography collage of the menu inline.
 5. **`user_review_node` (Human-in-the-Loop Interrupt)**: Stops execution to await user approval. If adjusted (e.g., *"Change Wednesday to pasta"*), it routes back to regenerate only the requested day, preserving all other days.
-6. **`grocery_list_builder` (Pantry Subtractor)**: Compiles required ingredients and subtracts current pantry quantities to produce a minimal categorized shopping list.
+6. **`grocery_list_builder` (Pantry Subtractor & Cost Estimator)**: Compiles required ingredients, subtracts current pantry quantities, and calculates the total estimated cost of the weekly grocery list using mock prices.
 7. **`FeedbackAgent` & `feedback_processor` (Memory Agents)**: Analyzes recipe ratings, extracts positive/negative sentiment, and updates the local favorites profile (`user_profile.json`).
+8. **`collect_recipe_context` & `RecipeInstructor` (Recipe Agents)**: Identifies which meal the user is asking about from the active session menu, and generates detailed step-by-step cooking instructions, prep times, and chef tips.
 
 ---
 
 ## 3. Key Concepts & Innovations Applied
 
 ### A. True Multi-Agent Collaboration
-Instead of a single monolithic prompt, the system delegates tasks to specialized agents (e.g., `MenuGeneratorAgent` for planning, `FeedbackAgent` for memory processing, and `menu_visualizer` for imagery). This separation of concerns improves reliability, reduces prompt complexity, and allows for independent scaling.
+Instead of a single monolithic prompt, the system delegates tasks to specialized agents: `MenuGeneratorAgent` (planning), `FeedbackAgent` (memory), `RecipeInstructor` (cooking instructions), and `menu_visualizer` (imagery). This separation of concerns improves reliability, reduces prompt complexity, and allows for independent scaling.
 
 ### B. Multi-Model Strategy (Optimized Quota Routing)
 To prevent quota errors and rate limiting, the architecture is divided into three isolated model pools:
