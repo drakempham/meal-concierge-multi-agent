@@ -51,3 +51,17 @@ def remove_recipe_from_rotation(recipe_name: str) -> bool:
         save_profile(profile)
         return True
     return False
+
+def add_recipe_to_dislikes(recipe_name: str) -> bool:
+    """Appends a recipe name to the disliked_recipes list if it does not already exist."""
+    profile = load_profile()
+    dislikes = profile.setdefault("disliked_recipes", [])
+    name_clean = recipe_name.strip().lower()
+    
+    # Check if already exists
+    if name_clean in [d.strip().lower() for d in dislikes]:
+        return False
+        
+    dislikes.append(recipe_name.strip())
+    save_profile(profile)
+    return True

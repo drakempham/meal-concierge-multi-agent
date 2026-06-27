@@ -28,7 +28,7 @@ from google.adk.apps import App, ResumabilityConfig
 from google.genai import types
 
 from app.tools import get_weather_forecast, get_family_calendar, get_pantry_inventory
-from app.memory import load_profile, add_recipe_to_rotation, remove_recipe_from_rotation
+from app.memory import load_profile, add_recipe_to_rotation, remove_recipe_from_rotation, add_recipe_to_dislikes
 
 # Ensure target environment variables are set for local execution
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "mock-project")
@@ -366,7 +366,18 @@ async def embedding_intent_router(ctx: Context, node_input: Any) -> Event:
             intent = "plan"
         logger.info(f"EmbeddingRouter: Keyword fallback → intent='{intent}'")
 
-    return Event(output=query, route=intent, state={"user_query": query})
+    state_updates = {"user_query": query}
+    if intent == "plan":
+        # Check if the query is an adjustment or a fresh planning request
+        adjustment_indicators = ["change", "replace", "adjust", "instead", "modify", "swap",
+                                 "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        is_adjustment = any(word in query.lower() for word in adjustment_indicators)
+        if is_adjustment:
+            state_updates["adjustments"] = query
+        else:
+            state_updates["adjustments"] = None
+
+    return Event(output=query, route=intent, state=state_updates)
 
 @node
 def collect_context(ctx: Context, node_input: Any) -> WeeklyContext:
@@ -391,7 +402,8 @@ def collect_context(ctx: Context, node_input: Any) -> WeeklyContext:
     preferences = {
         "dietary_constraints": profile.get("dietary_constraints", []),
         "target_macros": profile.get("target_macros", {}),
-        "recipe_rotation": [r["name"] for r in profile.get("recipe_rotation", [])]
+        "recipe_rotation": [r["name"] for r in profile.get("recipe_rotation", [])],
+        "disliked_recipes": profile.get("disliked_recipes", [])
     }
     
     # Check if we have previous adjustments stored in workflow state
@@ -422,7 +434,7 @@ menu_generator_instruction = """
 You are Meal Concierge Multi-Agent, the master family meal planner. Your job is to generate a structured 7-day meal plan (from Monday to Sunday) based on:
 1. Daily schedule and weather constraints (e.g., if sports matches are scheduled, suggest easy meals; if weather is rainy, disable outdoor grilling).
 2. Daily headcount (custody schedule). Adjust food quantities accordingly.
-3. Family dietary restrictions, macro targets, and picky eater preferences. Avoid forbidden foods (like seafood or mushrooms).
+3. Family dietary restrictions, macro targets, and picky eater preferences. Avoid forbidden foods (like seafood or mushrooms) and strictly avoid proposing any meal names or dishes listed in 'disliked_recipes' under family preferences.
 4. Utilize a mix of the family's 'recipe_rotation' favorites and 1-2 'new' recipe ideas.
 5. Strictly match the ingredient names/keys to the ones listed in the pantry inventory when possible (e.g. use 'chicken_breast_g', 'pasta_g', 'flour_g', 'tomato_sauce_g', etc.). Do not invent new names for existing pantry items.
 
@@ -453,8 +465,16 @@ def validate_dietary_constraints(menu: WeeklyMenu) -> List[str]:
         "raw onions": ["raw onion", "raw onions"]
     }
     
+    profile = load_profile()
+    disliked_recipes = [d.strip().lower() for d in profile.get("disliked_recipes", [])]
+    
     for meal in menu.meals:
-        meal_name_lower = meal.meal_name.lower()
+        meal_name_lower = meal.meal_name.strip().lower()
+        
+        # Check disliked_recipes
+        if meal_name_lower in disliked_recipes:
+            violations.append(f"Day {meal.day}: Meal '{meal.meal_name}' is in the family's disliked recipes list.")
+            
         # Check meal name
         for category, words in forbidden_keywords.items():
             for word in words:
@@ -470,6 +490,25 @@ def validate_dietary_constraints(menu: WeeklyMenu) -> List[str]:
                         violations.append(f"Day {meal.day}: Ingredient '{ing.name}' is forbidden ({category})")
                         
     return violations
+
+def parse_ingredient_unit(ing_name: str):
+    unit = " units"
+    clean_name = ing_name
+    if ing_name.endswith("_g"):
+        unit = "g"
+        clean_name = ing_name[:-2]
+    elif ing_name.endswith("_ml"):
+        unit = "ml"
+        clean_name = ing_name[:-3]
+    elif ing_name.endswith("_pcs"):
+        unit = " pcs"
+        clean_name = ing_name[:-4]
+    elif ing_name.endswith("_pc"):
+        unit = " pc"
+        clean_name = ing_name[:-3]
+    
+    clean_name = clean_name.replace("_", " ")
+    return clean_name, unit
 
 # ---------------------------------------------------------------------------
 # Menu Visualizer — OpenAI Image Generation (DALL-E & ChatGPT Image)
@@ -618,11 +657,16 @@ async def user_review_node(ctx: Context, node_input: WeeklyMenu) -> Event:
             menu_text += "\n"
             
         for meal in node_input.meals:
+            clean_ingredients = []
+            for ing in meal.ingredients:
+                clean_name, unit = parse_ingredient_unit(ing.name)
+                clean_ingredients.append(f"{clean_name} ({ing.amount}{unit})")
+                
             menu_text += (
                 f"- **{meal.day}** (Headcount: {get_family_calendar(meal.day)['headcount']}): "
                 f"{meal.meal_name} ({meal.cooking_style}, Prep: {meal.prep_time_minutes}m, "
                 f"Protein: {meal.estimated_protein_g}g, Cal: {meal.estimated_calories} kcal)\n"
-                f"  * Ingredients: {', '.join(f'{ing.name} ({ing.amount}g/ml/units)' for ing in meal.ingredients)}\n"
+                f"  * Ingredients: {', '.join(clean_ingredients)}\n"
             )
         menu_text += f"\n**Rationale**: {node_input.rationale}\n"
         
@@ -648,7 +692,10 @@ async def user_review_node(ctx: Context, node_input: WeeklyMenu) -> Event:
         yield Event(
             output=node_input,
             route="approved",
-            state={"approved_menu": node_input.model_dump()}
+            state={
+                "approved_menu": node_input.model_dump(),
+                "adjustments": None  # Clear adjustments upon approval
+            }
         )
     else:
         # User requested changes, loop back to collect_context with the adjustment text string.
@@ -678,24 +725,7 @@ def grocery_list_builder(node_input: WeeklyMenu) -> Event:
         if needed > 0:
             shopping_list[ing] = needed
 
-    def parse_ingredient_unit(ing_name: str):
-        unit = " units"
-        clean_name = ing_name
-        if ing_name.endswith("_g"):
-            unit = "g"
-            clean_name = ing_name[:-2]
-        elif ing_name.endswith("_ml"):
-            unit = "ml"
-            clean_name = ing_name[:-3]
-        elif ing_name.endswith("_pcs"):
-            unit = " pcs"
-            clean_name = ing_name[:-4]
-        elif ing_name.endswith("_pc"):
-            unit = " pc"
-            clean_name = ing_name[:-3]
-        
-        clean_name = clean_name.replace("_", " ")
-        return clean_name, unit
+
 
     def get_ingredient_price(ing_name: str, qty: float) -> float:
         # Mock price database per unit (g, ml, pc)
@@ -744,8 +774,27 @@ def grocery_list_builder(node_input: WeeklyMenu) -> Event:
     # Calculate total cost
     total_cost = sum(get_ingredient_price(ing, qty) for ing, qty in shopping_list.items())
 
-    # 3. Format categorized shopping list
-    output_text = "\n### 🛒 Approved! Your Categorized Grocery List:\n"
+    # 3. Format the final output text including BOTH menu and shopping list
+    output_text = "\n## 🎉 Approved! Here is your Final Weekly Plan:\n"
+    
+    # Add Menu details
+    output_text += "\n### 📅 Weekly Menu:\n"
+    for meal in node_input.meals:
+        clean_ingredients = []
+        for ing in meal.ingredients:
+            clean_name, unit = parse_ingredient_unit(ing.name)
+            clean_ingredients.append(f"{clean_name} ({ing.amount}{unit})")
+            
+        output_text += (
+            f"- **{meal.day}** (Headcount: {get_family_calendar(meal.day)['headcount']}): "
+            f"{meal.meal_name} ({meal.cooking_style}, Prep: {meal.prep_time_minutes}m, "
+            f"Protein: {meal.estimated_protein_g}g, Cal: {meal.estimated_calories} kcal)\n"
+            f"  * Ingredients: {', '.join(clean_ingredients)}\n"
+        )
+    output_text += f"\n**Rationale**: {node_input.rationale}\n"
+    
+    # Add Shopping List details
+    output_text += "\n---\n\n### 🛒 Categorized Grocery List:\n"
     if not shopping_list:
         output_text += "You already have all the ingredients in your pantry!\n"
     else:
@@ -774,7 +823,33 @@ def grocery_list_builder(node_input: WeeklyMenu) -> Event:
             
     # Yield content for the user interface
     yield Event(content=types.Content(role="model", parts=[types.Part.from_text(text=output_text)]))
-    yield Event(output={"shopping_list": shopping_list, "menu": node_input.model_dump()})
+    
+    # Return BeautifulGroceryOutput to keep test compatibility AND show markdown in the Playground
+    class BeautifulGroceryOutput(str):
+        def __new__(cls, text_content, shopping_list, menu_dict):
+            obj = super().__new__(cls, text_content)
+            obj._shopping_list = shopping_list
+            obj._menu_dict = menu_dict
+            return obj
+
+        def __contains__(self, key):
+            return key in ("shopping_list", "menu")
+
+        def __getitem__(self, key):
+            if key == "shopping_list":
+                return self._shopping_list
+            elif key == "menu":
+                return self._menu_dict
+            raise KeyError(key)
+
+        def get(self, key, default=None):
+            if key == "shopping_list":
+                return self._shopping_list
+            elif key == "menu":
+                return self._menu_dict
+            return default
+
+    yield Event(output=BeautifulGroceryOutput(output_text, shopping_list, node_input.model_dump()))
 
 # Prompt for Feedback Processor
 feedback_instruction = """
@@ -827,10 +902,13 @@ def feedback_processor(node_input: FeedbackOutput) -> str:
             confirm = f"\n[Memory Update] '{node_input.meal_name}' is already in your family favorites.\n"
     elif node_input.sentiment == "negative":
         removed = remove_recipe_from_rotation(node_input.meal_name)
+        added_dislike = add_recipe_to_dislikes(node_input.meal_name)
         if removed:
-            confirm = f"\n[Memory Update] Removed '{node_input.meal_name}' from your family favorites rotation due to negative feedback.\n"
+            confirm = f"\n[Memory Update] Removed '{node_input.meal_name}' from your family favorites rotation due to negative feedback, and added to dislikes.\n"
+        elif added_dislike:
+            confirm = f"\n[Memory Update] Added '{node_input.meal_name}' to your disliked recipes list to avoid in the future.\n"
         else:
-            confirm = f"\n[Memory Update] Feedback recorded: Negative sentiment for '{node_input.meal_name}' (Not in favorites list).\n"
+            confirm = f"\n[Memory Update] Feedback recorded: Negative sentiment for '{node_input.meal_name}' (Already in dislikes).\n"
     else:
         confirm = f"\n[Memory Update] Feedback recorded for '{node_input.meal_name}'.\n"
         

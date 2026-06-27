@@ -178,20 +178,6 @@
       "protein_g": 35,
       "fat_g": 18,
       "calories": 650
-    },
-    {
-      "name": "Pasta",
-      "ingredients": {
-        "pasta_g": 100,
-        "tomato_sauce_ml": 150,
-        "parmesan_cheese_g": 20
-      },
-      "prep_time_minutes": 20,
-      "cook_time_minutes": 15,
-      "cooking_style": "Stovetop",
-      "protein_g": 15,
-      "fat_g": 10,
-      "calories": 450
     }
   ],
   "pantry": {
@@ -211,5 +197,10 @@
     "heavy_cream_ml": 0,
     "butter_g": 250,
     "parmesan_g": 50
-  }
+  },
+  "disliked_recipes": [
+    "Pasta",
+    "Beef Chili",
+    "Garlic Butter"
+  ]
 }
